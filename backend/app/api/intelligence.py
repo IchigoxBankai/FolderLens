@@ -1,3 +1,5 @@
+import os
+import re
 import json
 import logging
 from typing import List, Dict, Any
@@ -192,21 +194,66 @@ def get_analytics(db: Session = Depends(get_db)):
         recent_searches_count=history_count
     )
 
+def normalize_text(text: str) -> str:
+    """Lowercase, strip, and normalize hyphens/underscores to spaces."""
+    if not text:
+        return ""
+    text = text.lower().strip()
+    text = re.sub(r'[\-_]+', ' ', text)
+    text = re.sub(r'\s+', ' ', text)
+    return text
+
+def extract_search_tokens(query: str) -> List[str]:
+    """
+    Extracts candidate target keywords from user natural language query.
+    Handles phrases like:
+    - find 'gojo'
+    - find "gojo"
+    - where is gojo
+    - which folder is gojo in
+    - locate gojo.png
+    - gojo
+    """
+    q = query.strip().strip('"\'')
+    
+    # Remove common conversational command prefixes
+    patterns = [
+        r'^(?:please\s+)?(?:can\s+you\s+)?(?:find|search(?:\s+for)?|locate|where\s+is|which\s+folder\s+(?:is|has|contains)|show\s+me|tell\s+me\s+where\s+is|in\s+which\s+folder\s+is|lookup|get)\s+(?:the\s+)?(?:image\s+|file\s+|pic\s+|photo\s+|picture\s+)?(?:named\s+|called\s+)?',
+        r'^(?:image|file|pic|photo|picture)\s+(?:named|called)\s+'
+    ]
+    
+    cleaned = q
+    for pat in patterns:
+        cleaned = re.sub(pat, '', cleaned, flags=re.IGNORECASE).strip()
+    
+    # Strip any enclosing quotes
+    cleaned = cleaned.strip(' "\'')
+    
+    # Strip image extensions (.png, .jpg, .jpeg, .webp, .gif, .svg, .bmp, .tiff, .avif, .ico)
+    cleaned_no_ext = re.sub(r'\.(png|jpe?g|webp|gif|svg|bmp|tiff|avif|ico)$', '', cleaned, flags=re.IGNORECASE).strip()
+    
+    tokens = []
+    if cleaned_no_ext:
+        tokens.append(cleaned_no_ext)
+    if cleaned and cleaned.lower() != cleaned_no_ext.lower():
+        tokens.append(cleaned)
+    if q.lower() not in [t.lower() for t in tokens]:
+        tokens.append(q)
+        
+    return tokens
+
 @router.post("/assistant", response_model=AssistantQueryResponse)
 def run_ai_assistant_query(req: AssistantQueryRequest, db: Session = Depends(get_db)):
     """
-    Translates natural language user questions into real CLIP text-to-image vector similarity search.
-    No hallucinated responses - matches against user's actual stored visual library.
+    Translates natural language user questions into intelligent folder location answers.
+    Combines:
+    1. Case-insensitive exact & substring filename matching (extension-agnostic, e.g. find "gojo" -> "gojo.png" in folder X).
+    2. Folder name matching.
+    3. CLIP semantic text-to-image vector similarity search.
     """
     query_str = req.query.strip()
     if not query_str:
         raise HTTPException(status_code=400, detail="Search query cannot be empty")
-
-    try:
-        text_vector = generate_text_embedding(query_str)
-    except Exception as e:
-        logger.error(f"Text embedding generation error: {e}")
-        raise HTTPException(status_code=500, detail=f"AI Assistant CLIP error: {e}")
 
     products = db.query(ProductModel).all()
     if not products:
@@ -218,18 +265,93 @@ def run_ai_assistant_query(req: AssistantQueryRequest, db: Session = Depends(get
         )
 
     folder_map = {f.id: f for f in db.query(FolderModel).all()}
-    scored: List[SearchCandidate] = []
+    tokens = extract_search_tokens(query_str)
+    
+    # Try computing CLIP text embedding
+    text_vector = None
+    try:
+        # Use primary extracted target keyword or full query for CLIP
+        clip_query = tokens[0] if tokens else query_str
+        text_vector = generate_text_embedding(clip_query)
+    except Exception as e:
+        logger.warning(f"CLIP embedding failed, falling back to name/folder indexing: {e}")
+
+    scored_map: Dict[str, SearchCandidate] = {}
 
     for p in products:
-        prod_vec = p.get_vector()
-        similarity = compute_cosine_similarity(text_vector, prod_vec)
-        confidence = int(round(max(0.0, similarity) * 100))
+        folder = folder_map.get(p.folder_id)
+        if not folder:
+            continue
 
-        if confidence >= 45:  # Minimum text match confidence
-            folder = folder_map.get(p.folder_id)
-            if not folder:
+        raw_name = p.name or ""
+        name_no_ext, ext = os.path.splitext(raw_name)
+        norm_raw = normalize_text(raw_name)
+        norm_base = normalize_text(name_no_ext)
+        norm_folder = normalize_text(folder.name)
+
+        best_score = 0
+        reasons = []
+
+        # 1. Exact & Substring Filename / Product Name Checks
+        for token in tokens:
+            norm_token = normalize_text(token)
+            if not norm_token:
                 continue
 
+            # Exact match without extension (e.g. query "gojo" matches "gojo.png" or "Gojo.jpg")
+            if norm_token == norm_base or norm_token == norm_raw:
+                score = 100
+                if score > best_score:
+                    best_score = score
+                    reasons = [f"🎯 Exact filename match for '{raw_name}' in folder '{folder.name}'"]
+                break
+
+            # Word boundary / substring match
+            # e.g., token "gojo" in "gojo satoru.png" or "wallpaper_gojo.jpg"
+            if norm_token in norm_base or norm_token in norm_raw:
+                score = 95
+                if score > best_score:
+                    best_score = score
+                    reasons = [f"✓ Filename '{raw_name}' contains '{token}' (Folder: '{folder.name}')"]
+            elif norm_base in norm_token and len(norm_base) >= 3:
+                score = 90
+                if score > best_score:
+                    best_score = score
+                    reasons = [f"✓ Query contains product name '{name_no_ext}' (Folder: '{folder.name}')"]
+            
+            # Word token overlap
+            token_words = set(norm_token.split())
+            base_words = set(norm_base.split())
+            if token_words and base_words and (token_words & base_words):
+                overlap_ratio = len(token_words & base_words) / max(len(token_words), len(base_words))
+                score = int(75 + overlap_ratio * 15)
+                if score > best_score:
+                    best_score = score
+                    reasons = [f"✓ Word match in '{raw_name}' (Folder: '{folder.name}')"]
+
+            # Folder name match
+            if norm_token in norm_folder or norm_folder in norm_token:
+                score = 80
+                if score > best_score:
+                    best_score = score
+                    reasons = [f"📁 Image belongs to matching folder '{folder.name}'"]
+
+        # 2. CLIP Semantic Similarity Check
+        if text_vector is not None:
+            try:
+                prod_vec = p.get_vector()
+                sim = compute_cosine_similarity(text_vector, prod_vec)
+                clip_conf = int(round(max(0.0, sim) * 100))
+                if clip_conf >= 38:
+                    if clip_conf > best_score:
+                        best_score = clip_conf
+                        reasons = [f"🧠 Visual CLIP match ({clip_conf}%) in folder '{folder.name}'"]
+                    elif best_score >= 80:
+                        reasons.append(f"🧠 Visual relevance confirmed ({clip_conf}%)")
+            except Exception as e:
+                logger.debug(f"CLIP similarity calculation error for {p.id}: {e}")
+
+        if best_score >= 40:
             candidate = SearchCandidate(
                 product=ProductResponse(
                     id=p.id,
@@ -254,28 +376,40 @@ def run_ai_assistant_query(req: AssistantQueryRequest, db: Session = Depends(get
                     created_at=folder.created_at,
                     updated_at=folder.updated_at
                 ),
-                similarity=float(similarity),
-                confidence=confidence,
-                reasons=[f"✓ Semantic CLIP text match for '{query_str}' ({confidence}%)"]
+                similarity=float(best_score / 100.0),
+                confidence=best_score,
+                reasons=reasons
             )
-            scored.append(candidate)
+            scored_map[p.id] = candidate
 
+    scored = list(scored_map.values())
     scored.sort(key=lambda c: c.confidence, reverse=True)
 
     if scored:
+        top = scored[0]
+        # Direct, crystal-clear message pointing out the folder
+        if top.confidence >= 90:
+            if len(scored) == 1:
+                msg = f"📍 '{top.product.name}' is located in folder '{top.folder.name}'."
+            else:
+                msg = f"📍 Found {len(scored)} matching image(s). Top match '{top.product.name}' is in folder '{top.folder.name}'."
+        else:
+            msg = f"🔍 Found {len(scored)} relevant image(s). Best match is '{top.product.name}' in folder '{top.folder.name}'."
+
         return AssistantQueryResponse(
             query=query_str,
             found=True,
-            message=f"Found {len(scored)} matching image(s) in your library for '{query_str}'.",
+            message=msg,
             matches=scored[:8]
         )
     else:
         return AssistantQueryResponse(
             query=query_str,
             found=False,
-            message=f"I couldn't find any image matching '{query_str}' in your indexed library.",
+            message=f"I couldn't find any image matching '{query_str}' in your folders.",
             matches=[]
         )
+
 
 @router.get("/history", response_model=List[SearchHistoryResponse])
 def get_search_history(db: Session = Depends(get_db)):
