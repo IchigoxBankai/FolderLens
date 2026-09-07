@@ -158,6 +158,7 @@ export const AddFolderModal: React.FC<AddFolderModalProps> = ({
           handleReset();
           onClose();
         }, 500);
+      } catch (err: any) {
         if (!err.response) {
           setError(`Backend server is not reachable at ${API_BASE_URL}. If you are using a free Render instance, it might take ~30-50s to wake up from idle.`);
         } else {
