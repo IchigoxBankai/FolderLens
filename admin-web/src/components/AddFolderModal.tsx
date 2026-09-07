@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { X, FolderPlus, FolderUp, UploadCloud, Loader2 } from 'lucide-react';
+import { API_BASE_URL } from '../services/api';
 
 interface AddFolderModalProps {
   isOpen: boolean;
@@ -157,9 +158,8 @@ export const AddFolderModal: React.FC<AddFolderModalProps> = ({
           handleReset();
           onClose();
         }, 500);
-      } catch (err: any) {
         if (!err.response) {
-          setError("Backend server is not running or unreachable at http://localhost:8000. Please start the backend server in terminal.");
+          setError(`Backend server is not reachable at ${API_BASE_URL}. If you are using a free Render instance, it might take ~30-50s to wake up from idle.`);
         } else {
           setError(err.response?.data?.detail || 'Failed to upload folder. Please try again.');
         }
