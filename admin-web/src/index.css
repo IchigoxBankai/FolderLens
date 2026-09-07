@@ -1,0 +1,90 @@
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Inter:wght@300;400;500;600;700&family=Manrope:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root, html, body, .dark, .light {
+  /* Beach Aesthetic: Sky Blue + Sand Cream */
+  --bg-primary: #F8F4EA;       /* Warm Sandy Cream Page Background */
+  --bg-surface: #FFFFFF;       /* Crisp White-Cream Card Surface */
+  --bg-secondary: #F1E9D7;     /* Soft Dune Sand Secondary Panel */
+  --bg-elevated: #E6DCC5;      /* Warm Sun Sand Elevated */
+  --bg-active: #E0F2FE;        /* Sky Blue Active Pill Highlight */
+
+  --olive-primary: #0284C7;    /* Vibrant Sky Blue */
+  --olive-light: #38BDF8;      /* Bright Sky Cyan Blue */
+  --olive-deep: #0369A1;       /* Deep Sky Navy Blue */
+  --olive-hover: #0369A1;
+
+  --cream-bright: #0F172A;     /* Deep Sky Charcoal Text */
+  --cream-primary: #1E293B;    /* Navy Slate Text */
+  --cream-muted: #475569;      /* Sky Slate Subtitles */
+  --muted-gray: #64748B;       /* Sand Dune Gray Labels */
+
+  --border-color: #E2D7C3;     /* Warm Beach Sand Border */
+  --border-subtle: #ECE1CD;
+
+  --accent-success: #0D9488;   /* Teal Ocean Success */
+  --accent-warning: #D97706;   /* Sun Amber Warning */
+  --accent-danger: #E11D48;    /* Coral Danger */
+  --accent-info: #0284C7;      /* Sky Blue Info */
+}
+
+@layer base {
+  body {
+    background-color: var(--bg-primary);
+    color: var(--cream-bright);
+    font-family: 'Inter', 'Manrope', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+    overflow-x: hidden;
+    transition: background-color 0.2s ease, color 0.2s ease;
+  }
+
+  ::selection {
+    background-color: var(--olive-primary);
+    color: #F8F4EC;
+  }
+}
+
+/* Dynamic Workspace Panels */
+.glass-panel {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+}
+
+.glass-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  transition: all 0.2s ease-out;
+}
+
+.glass-card:hover {
+  border-color: var(--olive-primary);
+  background: var(--bg-secondary);
+}
+
+/* Editorial Serif Accent Class */
+.font-serif-title {
+  font-family: 'Cormorant Garamond', Georgia, serif;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-primary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--olive-primary);
+}
