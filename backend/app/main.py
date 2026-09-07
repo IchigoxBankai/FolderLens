@@ -53,6 +53,16 @@ app.include_router(products.router)
 app.include_router(search.router)
 app.include_router(intelligence.router)
 
+@app.get("/")
+def root():
+    """Root endpoint for health checks & Render verification"""
+    return {
+        "status": "online",
+        "service": "FolderLens API",
+        "docs": "/docs",
+        "health": "/api/health"
+    }
+
 @app.get("/api/health")
 def health_check():
     """Health check endpoint"""
