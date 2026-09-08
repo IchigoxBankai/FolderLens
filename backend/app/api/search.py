@@ -22,8 +22,8 @@ from app.embeddings.hash_engine import compute_sha256, compute_dhash, hamming_di
 router = APIRouter(prefix="/api/search", tags=["Search"])
 logger = logging.getLogger("product_finder.search")
 
-MATCH_STRONG_THRESHOLD = float(os.getenv("MATCH_STRONG_THRESHOLD", "0.75"))
-MATCH_WEAK_THRESHOLD = float(os.getenv("MATCH_WEAK_THRESHOLD", "0.60"))
+MATCH_STRONG_THRESHOLD = float(os.getenv("MATCH_STRONG_THRESHOLD", "0.65"))
+MATCH_WEAK_THRESHOLD = float(os.getenv("MATCH_WEAK_THRESHOLD", "0.45"))
 
 @router.post("/visual", response_model=SearchResponse)
 async def search_by_visual_embedding(
@@ -181,30 +181,31 @@ async def search_by_visual_embedding(
         logger.warning(f"Failed to record search history: {ex}")
 
     # Threshold evaluation
-    if best.confidence >= 75 or best.similarity >= MATCH_STRONG_THRESHOLD:
-        other_top = [c for c in scored_candidates[1:limit] if c.confidence >= 50]
+    if best.confidence >= 70 or best.similarity >= MATCH_STRONG_THRESHOLD:
+        other_top = [c for c in scored_candidates[1:limit] if c.confidence >= 40]
         return SearchResponse(
             matched=True,
-            message="Exact Match Found" if best.confidence >= 95 else "Match Found",
+            message="Exact Match Found" if best.confidence >= 95 else "Strong Match Found",
             best_match=best,
             other_matches=other_top,
             search_duration_ms=duration_ms
         )
-    elif best.confidence >= 50 or best.similarity >= MATCH_WEAK_THRESHOLD:
-        other_top = [c for c in scored_candidates[1:limit] if c.confidence >= 40]
+    elif best.confidence >= 40 or best.similarity >= MATCH_WEAK_THRESHOLD:
+        other_top = [c for c in scored_candidates[1:limit] if c.confidence >= 35]
         return SearchResponse(
             matched=True,
-            message="Possible Match Found",
+            message="Visual Match Found",
             best_match=best,
             other_matches=other_top,
             search_duration_ms=duration_ms
         )
     else:
+        is_possible = best.confidence >= 30 or best.similarity >= 0.30
         return SearchResponse(
-            matched=False,
-            message="No sufficiently similar image found in your indexed library.",
-            best_match=best if best.similarity > 0.4 else None,
-            other_matches=[c for c in scored_candidates[1:limit] if c.similarity > 0.35],
+            matched=is_possible,
+            message="Possible Visual Match Found" if is_possible else "No sufficiently similar image found in your indexed library.",
+            best_match=best if is_possible else None,
+            other_matches=[c for c in scored_candidates[1:limit] if c.similarity > 0.25],
             search_duration_ms=duration_ms
         )
 

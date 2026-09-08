@@ -412,7 +412,7 @@ export const SidePanel: React.FC = () => {
                   <div className="flex items-center space-x-3">
                     <div className="w-16 h-16 rounded-lg border border-panelBorder bg-spaceBg overflow-hidden flex-shrink-0">
                       <img
-                        src={getFullUrl(searchResult.best_match.product.image_url)}
+                        src={getFullUrl(searchResult.best_match.product.thumbnail_url || searchResult.best_match.product.image_url)}
                         alt={searchResult.best_match.product.name}
                         className="w-full h-full object-cover"
                       />
@@ -440,7 +440,7 @@ export const SidePanel: React.FC = () => {
 
                   <div className="flex items-center justify-between pt-1 text-[10px]">
                     <a
-                      href={getFullUrl(searchResult.best_match.product.image_url)}
+                      href={getFullUrl(searchResult.best_match.product.thumbnail_url || searchResult.best_match.product.image_url)}
                       target="_blank"
                       rel="noreferrer"
                       className="text-brandCyan hover:underline flex items-center gap-1"
@@ -462,7 +462,7 @@ export const SidePanel: React.FC = () => {
                       {searchResult.other_matches.map((match, idx) => (
                         <div key={idx} className="bg-panelBg/80 p-2 rounded-lg border border-panelBorder flex items-center space-x-2 text-xs">
                           <img
-                            src={getFullUrl(match.product.image_url)}
+                            src={getFullUrl(match.product.thumbnail_url || match.product.image_url)}
                             alt={match.product.name}
                             className="w-8 h-8 rounded object-cover border border-panelBorder flex-shrink-0"
                           />
