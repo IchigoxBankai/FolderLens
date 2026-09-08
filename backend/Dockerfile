@@ -2,7 +2,7 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies for OpenCV/Pillow
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
@@ -12,13 +12,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy backend application code
-COPY . .
+# Create non-root user for Hugging Face Spaces
+RUN useradd -m -u 1000 user
+ENV HOME=/home/user \
+    PATH=/home/user/.local/bin:$PATH
 
-# Create uploads storage directories
-RUN mkdir -p uploads/original uploads/thumbnails
+WORKDIR /app
+COPY --chown=user:user . .
 
-ENV PORT=8000
-EXPOSE 8000
+# Create uploads storage directories with correct permissions
+RUN mkdir -p uploads/original uploads/thumbnails && chown -R user:user /app/uploads
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+USER user
+
+ENV PORT=7860
+EXPOSE 7860
+
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-7860}"]

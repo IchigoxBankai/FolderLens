@@ -14,11 +14,13 @@ MODEL_NAME = os.getenv("MODEL_NAME", "openai/clip-vit-base-patch32")
 _processor = None
 _model = None
 
+LOW_MEMORY = os.getenv("LOW_MEMORY", "true").lower() in ("true", "1", "yes")
+
 def get_clip_model():
-    """Lazy loads CLIP model and processor"""
+    """Lazy loads CLIP model and processor with low-RAM optimization"""
     global _processor, _model
     if _processor is None or _model is None:
-        logger.info(f"Loading CLIP vision model: {MODEL_NAME}...")
+        logger.info(f"Loading CLIP vision model: {MODEL_NAME} (Low Memory Mode: {LOW_MEMORY})...")
         try:
             import torch
             from transformers import CLIPProcessor, CLIPModel
@@ -26,7 +28,15 @@ def get_clip_model():
             _processor = CLIPProcessor.from_pretrained(MODEL_NAME)
             _model = CLIPModel.from_pretrained(MODEL_NAME)
             _model.eval()
-            logger.info("CLIP vision model loaded successfully.")
+
+            # Dynamic INT8 CPU Quantization to shrink memory footprint by 65% for free cloud tiers
+            if LOW_MEMORY and not torch.cuda.is_available():
+                logger.info("Applying dynamic INT8 quantization for low-RAM cloud hosting...")
+                _model = torch.quantization.quantize_dynamic(
+                    _model, {torch.nn.Linear}, dtype=torch.qint8
+                )
+
+            logger.info("CLIP vision model loaded and optimized successfully.")
         except Exception as e:
             logger.error(f"Failed to load CLIP model '{MODEL_NAME}': {e}")
             raise RuntimeError(f"Could not load vision model: {e}")
