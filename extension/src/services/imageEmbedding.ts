@@ -1,8 +1,13 @@
-import { pipeline, env, RawImage } from '@huggingface/transformers';
+import { AutoProcessor, CLIPVisionModelWithProjection, env, RawImage } from '@huggingface/transformers';
 
 // Configure transformers.js for Chrome extension MV3 sidepanel
 env.allowLocalModels = false;
 env.useBrowserCache = true;
+
+if (env.backends?.onnx?.wasm) {
+  env.backends.onnx.wasm.numThreads = 1;
+  env.backends.onnx.wasm.proxy = false;
+}
 
 export type ModelProgressCallback = (info: {
   status: 'idle' | 'loading_model' | 'preparing_image' | 'generating_embedding' | 'ready' | 'error';
@@ -12,7 +17,8 @@ export type ModelProgressCallback = (info: {
 
 class ImageEmbeddingService {
   private static instance: ImageEmbeddingService;
-  private extractor: any = null;
+  private processor: any = null;
+  private model: any = null;
   private initPromise: Promise<any> | null = null;
   private modelName = 'Xenova/clip-vit-base-patch32';
   private isWebGPUAvailable = false;
@@ -29,18 +35,18 @@ class ImageEmbeddingService {
 
   public getStatus() {
     return {
-      isReady: this.extractor !== null,
+      isReady: this.model !== null,
       device: this.initializedDevice,
       modelName: this.modelName
     };
   }
 
   /**
-   * Initializes the vision feature extractor model lazily.
+   * Initializes the vision processor and CLIP model lazily.
    */
-  public async initialize(onProgress?: ModelProgressCallback): Promise<any> {
-    if (this.extractor) {
-      return this.extractor;
+  public async initialize(onProgress?: ModelProgressCallback): Promise<{ processor: any; model: any }> {
+    if (this.processor && this.model) {
+      return { processor: this.processor, model: this.model };
     }
 
     if (this.initPromise) {
@@ -69,7 +75,8 @@ class ImageEmbeddingService {
       }
 
       const devicesToTry = this.isWebGPUAvailable ? ['webgpu', 'wasm'] : ['wasm'];
-      let loadedPipeline = null;
+      let loadedProcessor = null;
+      let loadedModel = null;
       let usedDevice = 'wasm';
 
       for (const device of devicesToTry) {
@@ -77,19 +84,20 @@ class ImageEmbeddingService {
           if (onProgress) {
             onProgress({
               status: 'loading_model',
-              progress: 30,
+              progress: 25,
               message: `Initializing neural engine (${device.toUpperCase()})...`
             });
           }
 
-          loadedPipeline = await pipeline('image-feature-extraction', this.modelName, {
+          loadedProcessor = await AutoProcessor.from_pretrained(this.modelName);
+          loadedModel = await CLIPVisionModelWithProjection.from_pretrained(this.modelName, {
             device: device as any,
             progress_callback: (progressInfo: any) => {
               if (onProgress && progressInfo.status === 'progress') {
                 const percent = Math.round((progressInfo.progress || 0) * 100);
                 onProgress({
                   status: 'loading_model',
-                  progress: 30 + Math.round(percent * 0.6),
+                  progress: 25 + Math.round(percent * 0.7),
                   message: `Loading vision model (${percent}%)...`
                 });
               }
@@ -103,11 +111,12 @@ class ImageEmbeddingService {
         }
       }
 
-      if (!loadedPipeline) {
+      if (!loadedProcessor || !loadedModel) {
         throw new Error('Failed to initialize visual embedding model.');
       }
 
-      this.extractor = loadedPipeline;
+      this.processor = loadedProcessor;
+      this.model = loadedModel;
       this.initializedDevice = usedDevice;
 
       if (onProgress) {
@@ -118,14 +127,15 @@ class ImageEmbeddingService {
         });
       }
 
-      return this.extractor;
+      return { processor: this.processor, model: this.model };
     })();
 
     try {
       return await this.initPromise;
     } catch (err) {
       this.initPromise = null;
-      this.extractor = null;
+      this.processor = null;
+      this.model = null;
       throw err;
     }
   }
@@ -137,7 +147,7 @@ class ImageEmbeddingService {
     imageInput: Blob | string | HTMLImageElement,
     onProgress?: ModelProgressCallback
   ): Promise<number[]> {
-    const extractor = await this.initialize(onProgress);
+    const { processor, model } = await this.initialize(onProgress);
 
     if (onProgress) {
       onProgress({
@@ -155,19 +165,16 @@ class ImageEmbeddingService {
       });
     }
 
-    const output = await extractor(rawImage, { pooling: 'none', normalize: false });
-    
+    const imageInputs = await processor(rawImage);
+    const { image_embeds } = await model(imageInputs);
+
     let vectorData: number[] = [];
-    if (output && output.data) {
-      vectorData = Array.from(output.data);
-    } else if (Array.isArray(output)) {
-      vectorData = output;
+    if (image_embeds && image_embeds.data) {
+      vectorData = Array.from(image_embeds.data);
+    } else if (Array.isArray(image_embeds)) {
+      vectorData = image_embeds;
     } else {
       throw new Error('Unexpected model output format');
-    }
-
-    if (vectorData.length > 512) {
-      vectorData = vectorData.slice(0, 512);
     }
 
     const normalized = normalizeL2(vectorData);
