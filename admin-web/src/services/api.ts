@@ -4,6 +4,13 @@ import {
   DuplicateIntelligenceResponse, AnalyticsResponse, SearchHistoryEntry,
   AssistantResponse, User
 } from '../types/api';
+import {
+  imageEmbeddingService,
+  computeSHA256,
+  computeDHash,
+  generateThumbnailBase64,
+  ModelProgressCallback
+} from './imageEmbedding';
 
 export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -47,25 +54,47 @@ export const uploadFolderFromPC = async (
   files: File[],
   onProgress?: (progressText: string) => void
 ): Promise<Folder> => {
-  const formData = new FormData();
-  formData.append('folder_name', folderName);
+  const total = files.length;
+  if (onProgress) onProgress(`Preparing ${total} images for local AI indexing...`);
 
-  files.forEach((file) => {
-    formData.append('images', file, file.name);
-  });
+  const indexedItems = [];
 
-  if (onProgress) onProgress(`Uploading ${files.length} product images...`);
-
-  const response = await api.post('/api/folders/upload', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-    onUploadProgress: (evt) => {
-      if (evt.progress && evt.progress >= 0.95) {
-        if (onProgress) onProgress('Generating visual fingerprints & indexing database...');
-      } else {
-        const percent = evt.progress ? Math.round(evt.progress * 100) : 0;
-        if (onProgress) onProgress(`Uploading folder contents (${percent}%)...`);
-      }
+  for (let i = 0; i < total; i++) {
+    const file = files[i];
+    const percent = Math.round(((i + 1) / total) * 100);
+    if (onProgress) {
+      onProgress(`Extracting visual signature ${i + 1}/${total} (${percent}%)...`);
     }
+
+    try {
+      const [sha256Hash, phash, thumbBase64, embedding] = await Promise.all([
+        computeSHA256(file),
+        computeDHash(file).catch(() => undefined),
+        generateThumbnailBase64(file).catch(() => undefined),
+        imageEmbeddingService.generateEmbedding(file)
+      ]);
+
+      const nameWithoutExt = file.name.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " ");
+
+      indexedItems.push({
+        name: nameWithoutExt || `Product Image ${i + 1}`,
+        embedding,
+        sha256_hash: sha256Hash,
+        phash,
+        file_size: file.size,
+        mime_type: file.type || 'image/jpeg',
+        thumbnail_base64: thumbBase64
+      });
+    } catch (err) {
+      console.warn(`Failed to generate client embedding for ${file.name}:`, err);
+    }
+  }
+
+  if (onProgress) onProgress('Saving indexed folder to library database...');
+
+  const response = await api.post('/api/folders/upload-indexed', {
+    folder_name: folderName,
+    items: indexedItems
   });
 
   return response.data;
@@ -97,22 +126,28 @@ export const createProduct = async (
   imageFile: File,
   onProgress?: (step: string) => void
 ): Promise<Product> => {
+  if (onProgress) onProgress('Generating visual AI embedding in browser...');
+
+  const [sha256Hash, phash, embedding] = await Promise.all([
+    computeSHA256(imageFile),
+    computeDHash(imageFile).catch(() => undefined),
+    imageEmbeddingService.generateEmbedding(imageFile, (info) => {
+      if (onProgress) onProgress(info.message);
+    })
+  ]);
+
+  if (onProgress) onProgress('Uploading image to FolderLens database...');
+
   const formData = new FormData();
   formData.append('folder_id', folderId);
   formData.append('name', name);
   formData.append('image', imageFile);
-
-  if (onProgress) onProgress('Uploading image...');
+  formData.append('embedding', JSON.stringify(embedding));
+  if (sha256Hash) formData.append('sha256_hash', sha256Hash);
+  if (phash) formData.append('phash', phash);
 
   const response = await api.post('/api/products', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
-    onUploadProgress: (evt) => {
-      if (evt.progress && evt.progress >= 0.99) {
-        if (onProgress) onProgress('Generating visual fingerprint & hashes...');
-      } else {
-        if (onProgress) onProgress('Uploading image...');
-      }
-    }
   });
 
   return response.data;
@@ -123,23 +158,63 @@ export const deleteProduct = async (productId: string): Promise<void> => {
 };
 
 // Search Services
-export const searchByImageFile = async (file: File): Promise<SearchResponse> => {
-  const formData = new FormData();
-  formData.append('image', file);
+export const searchByImageFile = async (
+  file: File,
+  onStepProgress?: ModelProgressCallback
+): Promise<SearchResponse> => {
+  if (onStepProgress) {
+    onStepProgress({
+      status: 'preparing_image',
+      message: 'Generating image hashes & visual signature locally...'
+    });
+  }
 
-  const response = await api.post('/api/search/image', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
+  const [sha256Hash, phash, embedding] = await Promise.all([
+    computeSHA256(file),
+    computeDHash(file).catch(() => undefined),
+    imageEmbeddingService.generateEmbedding(file, onStepProgress)
+  ]);
+
+  if (onStepProgress) {
+    onStepProgress({
+      status: 'generating_embedding',
+      message: 'Searching multi-signal vector database...'
+    });
+  }
+
+  const response = await api.post('/api/search/visual', {
+    embedding,
+    sha256_hash: sha256Hash,
+    phash: phash,
+    limit: 10
   });
 
   return response.data;
 };
 
-export const searchByImageUrl = async (imageUrl: string): Promise<SearchResponse> => {
-  const formData = new FormData();
-  formData.append('image_url', imageUrl);
+export const searchByImageUrl = async (
+  imageUrl: string,
+  onStepProgress?: ModelProgressCallback
+): Promise<SearchResponse> => {
+  if (onStepProgress) {
+    onStepProgress({
+      status: 'preparing_image',
+      message: 'Processing image URL...'
+    });
+  }
 
-  const response = await api.post('/api/search/image', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
+  const embedding = await imageEmbeddingService.generateEmbedding(imageUrl, onStepProgress);
+
+  if (onStepProgress) {
+    onStepProgress({
+      status: 'generating_embedding',
+      message: 'Searching vector database...'
+    });
+  }
+
+  const response = await api.post('/api/search/visual', {
+    embedding,
+    limit: 10
   });
 
   return response.data;

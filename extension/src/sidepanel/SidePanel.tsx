@@ -1,5 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { MousePointerClick, Search, CheckCircle2, AlertCircle, RefreshCw, Folder as FolderIcon, Settings, X, Zap, Sun, Moon } from 'lucide-react';
+import { MousePointerClick, Search, CheckCircle2, AlertCircle, RefreshCw, Folder as FolderIcon, Settings, X, Zap, Sun, Moon, ExternalLink } from 'lucide-react';
+import {
+  imageEmbeddingService,
+  computeSHA256,
+  computeDHash
+} from '../services/imageEmbedding';
 
 interface Product {
   id: string;
@@ -26,10 +31,22 @@ interface SearchResponse {
   message: string;
   best_match?: MatchCandidate;
   other_matches?: MatchCandidate[];
+  search_duration_ms?: number;
 }
 
+const normalizeUrl = (rawUrl: string): string => {
+  let u = (rawUrl || '').trim().replace(/\/+$/, '');
+  if (!u) return 'https://folderlens.onrender.com';
+  if (!u.startsWith('http://') && !u.startsWith('https://')) {
+    u = `https://${u}`;
+  }
+  return u;
+};
+
 export const SidePanel: React.FC = () => {
-  const [backendUrl, setBackendUrl] = useState('http://localhost:8000');
+  const [backendUrl, setBackendUrl] = useState(() => {
+    return normalizeUrl(localStorage.getItem('folderlens_backend_url') || 'https://folderlens.onrender.com');
+  });
   const [showSettings, setShowSettings] = useState(false);
   const [isConnected, setIsConnected] = useState<boolean | null>(null);
   const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
@@ -42,7 +59,7 @@ export const SidePanel: React.FC = () => {
   // States: 'idle' | 'selecting' | 'captured' | 'searching' | 'result' | 'error'
   const [status, setStatus] = useState<'idle' | 'selecting' | 'captured' | 'searching' | 'result' | 'error'>('idle');
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
-  const [searchStep, setSearchStep] = useState('Analyzing image...');
+  const [searchStep, setSearchStep] = useState('Preparing visual search engine...');
   const [searchResult, setSearchResult] = useState<SearchResponse | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -64,11 +81,21 @@ export const SidePanel: React.FC = () => {
 
   const checkHealth = async (url = backendUrl) => {
     try {
-      const resp = await fetch(`${url}/api/health`, { method: 'GET' });
+      const target = normalizeUrl(url);
+      const resp = await fetch(`${target}/api/health`, { method: 'GET' });
       setIsConnected(resp.ok);
     } catch {
       setIsConnected(false);
     }
+  };
+
+  const handleSaveBackendUrl = (newUrl: string) => {
+    const clean = normalizeUrl(newUrl);
+    setBackendUrl(clean);
+    localStorage.setItem('folderlens_backend_url', clean);
+    chrome.storage.local.set({ backendUrl: clean });
+    checkHealth(clean);
+    setShowSettings(false);
   };
 
   const handleStartSelection = () => {
@@ -88,7 +115,11 @@ export const SidePanel: React.FC = () => {
   };
 
   useEffect(() => {
-    checkHealth();
+    chrome.storage.local.get(['backendUrl'], (res) => {
+      const url = normalizeUrl(res.backendUrl || localStorage.getItem('folderlens_backend_url') || 'https://folderlens.onrender.com');
+      setBackendUrl(url);
+      checkHealth(url);
+    });
 
     // Automatically activate image selection mode on mount if auto-select is enabled
     chrome.storage.local.get(['autoSelectEnabled'], (res) => {
@@ -167,29 +198,47 @@ export const SidePanel: React.FC = () => {
 
   const executeSearch = async (imageSrc: string) => {
     setStatus('searching');
-    setSearchStep('Extracting CLIP visual embeddings & hashes...');
+    setSearchStep('Preparing image...');
     setErrorMsg('');
 
     try {
-      const formData = new FormData();
-
+      let imageBlob: Blob | null = null;
       if (imageSrc.startsWith('data:image')) {
         const res = await fetch(imageSrc);
-        const blob = await res.blob();
-        formData.append('image', blob, 'captured.png');
+        imageBlob = await res.blob();
       } else if (imageSrc.startsWith('http://') || imageSrc.startsWith('https://')) {
-        formData.append('image_url', imageSrc);
-      } else {
-        const res = await fetch(imageSrc);
-        const blob = await res.blob();
-        formData.append('image', blob, 'captured.png');
+        try {
+          const res = await fetch(imageSrc);
+          if (res.ok) imageBlob = await res.blob();
+        } catch {
+          // CORS restricted URL - will pass imageSrc string directly
+        }
       }
 
-      setSearchStep('Searching multi-signal vector database...');
+      setSearchStep('Generating visual signature...');
+      const targetInput = imageBlob || imageSrc;
 
-      const response = await fetch(`${backendUrl}/api/search/image`, {
+      const [sha256Hash, phash, embedding] = await Promise.all([
+        imageBlob ? computeSHA256(imageBlob).catch(() => undefined) : undefined,
+        computeDHash(targetInput).catch(() => undefined),
+        imageEmbeddingService.generateEmbedding(targetInput, (info) => {
+          setSearchStep(info.message);
+        })
+      ]);
+
+      setSearchStep('Searching library...');
+
+      const response = await fetch(`${backendUrl}/api/search/visual`, {
         method: 'POST',
-        body: formData,
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          embedding,
+          sha256_hash: sha256Hash,
+          phash: phash,
+          limit: 10
+        }),
       });
 
       if (!response.ok) {
@@ -197,7 +246,6 @@ export const SidePanel: React.FC = () => {
         throw new Error(errData.detail || 'Visual search request failed');
       }
 
-      setSearchStep('Ranking top matching results...');
       const data: SearchResponse = await response.json();
 
       setSearchResult(data);
@@ -235,7 +283,7 @@ export const SidePanel: React.FC = () => {
             <div className="flex items-center space-x-1.5 mt-1">
               <span className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-accentSuccess animate-pulse' : 'bg-accentDanger'}`}></span>
               <span className="text-[10px] text-subtleText">
-                {isConnected ? 'Backend Active' : 'Offline'}
+                {isConnected ? 'Lightweight API' : 'Offline'}
               </span>
             </div>
           </div>
@@ -275,10 +323,11 @@ export const SidePanel: React.FC = () => {
             type="text"
             value={backendUrl}
             onChange={(e) => setBackendUrl(e.target.value)}
+            placeholder="https://folderlens.onrender.com"
             className="w-full text-xs px-3 py-1.5 bg-spaceBg border border-panelBorder rounded-lg text-darkText focus:outline-none focus:border-brandPrimary"
           />
           <button
-            onClick={() => { checkHealth(backendUrl); setShowSettings(false); }}
+            onClick={() => handleSaveBackendUrl(backendUrl)}
             className="w-full py-1.5 bg-brandPrimary hover:bg-brandPrimary-hover text-white font-semibold text-xs rounded-lg shadow-sm"
           >
             Save & Reconnect
@@ -333,7 +382,7 @@ export const SidePanel: React.FC = () => {
         {status === 'searching' && (
           <div className="flex-1 flex flex-col justify-center items-center text-center p-6 space-y-3">
             <div className="w-10 h-10 rounded-full border-2 border-panelBorder border-t-brandCyan animate-spin"></div>
-            <h3 className="text-xs font-bold text-darkText">Analyzing Image Features...</h3>
+            <h3 className="text-xs font-bold text-darkText">Analyzing Image Signature</h3>
             <p className="text-[11px] text-subtleText">{searchStep}</p>
           </div>
         )}
@@ -342,42 +391,83 @@ export const SidePanel: React.FC = () => {
         {status === 'result' && searchResult && (
           <div className="flex-1 flex flex-col justify-between space-y-4">
             {searchResult.matched && searchResult.best_match ? (
-              <div className="bg-panelBg rounded-xl border border-accentSuccess/40 p-4 shadow-xl space-y-3">
-                <div className="flex items-center justify-between border-b border-panelBorder pb-2">
-                  <span className="text-xs font-bold text-accentSuccess flex items-center gap-1.5">
-                    <CheckCircle2 className="w-4 h-4" /> MATCH FOUND
-                  </span>
-                  <span className="px-2 py-0.5 text-[10px] font-mono bg-accentSuccess/20 text-accentSuccess rounded border border-accentSuccess/30">
-                    {searchResult.best_match.confidence}% CONFIDENCE
-                  </span>
-                </div>
-
-                <div className="flex items-center space-x-3">
-                  <div className="w-16 h-16 rounded-lg border border-panelBorder bg-spaceBg overflow-hidden flex-shrink-0">
-                    <img
-                      src={getFullUrl(searchResult.best_match.product.image_url)}
-                      alt={searchResult.best_match.product.name}
-                      className="w-full h-full object-cover"
-                    />
+              <div className="space-y-3">
+                {/* Best Match Card */}
+                <div className="bg-panelBg rounded-xl border border-accentSuccess/40 p-4 shadow-xl space-y-3">
+                  <div className="flex items-center justify-between border-b border-panelBorder pb-2">
+                    <span className="text-xs font-bold text-accentSuccess flex items-center gap-1.5">
+                      <CheckCircle2 className="w-4 h-4" /> MATCH FOUND
+                    </span>
+                    <span className="px-2 py-0.5 text-[10px] font-mono bg-accentSuccess/20 text-accentSuccess rounded border border-accentSuccess/30 font-bold">
+                      {searchResult.best_match.confidence}% CONFIDENCE
+                    </span>
                   </div>
 
-                  <div className="space-y-1 min-w-0">
-                    <h3 className="text-xs font-bold text-darkText truncate" title={searchResult.best_match.product.name}>
-                      {searchResult.best_match.product.name}
-                    </h3>
+                  <div className="flex items-center space-x-3">
+                    <div className="w-16 h-16 rounded-lg border border-panelBorder bg-spaceBg overflow-hidden flex-shrink-0">
+                      <img
+                        src={getFullUrl(searchResult.best_match.product.image_url)}
+                        alt={searchResult.best_match.product.name}
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
 
-                    <div className="inline-flex items-center space-x-1 px-2 py-0.5 rounded bg-brandPrimary/20 text-brandCyan font-semibold text-[11px] border border-brandPrimary/30">
-                      <FolderIcon className="w-3 h-3 text-brandCyan" />
-                      <span className="truncate">📁 {searchResult.best_match.folder.name}</span>
+                    <div className="space-y-1 min-w-0">
+                      <h3 className="text-xs font-bold text-darkText truncate" title={searchResult.best_match.product.name}>
+                        {searchResult.best_match.product.name}
+                      </h3>
+
+                      <div className="inline-flex items-center space-x-1 px-2 py-0.5 rounded bg-brandPrimary/20 text-brandCyan font-semibold text-[11px] border border-brandPrimary/30">
+                        <FolderIcon className="w-3 h-3 text-brandCyan" />
+                        <span className="truncate">📁 {searchResult.best_match.folder.name}</span>
+                      </div>
                     </div>
                   </div>
+
+                  {searchResult.best_match.reasons && searchResult.best_match.reasons.length > 0 && (
+                    <div className="bg-spaceBg p-2.5 rounded-lg border border-panelBorder space-y-1 text-[10px] text-subtleText">
+                      {searchResult.best_match.reasons.map((r, idx) => (
+                        <div key={idx}>{r}</div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between pt-1 text-[10px]">
+                    <a
+                      href={getFullUrl(searchResult.best_match.product.image_url)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-brandCyan hover:underline flex items-center gap-1"
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                      <span>Open file</span>
+                    </a>
+                    {searchResult.search_duration_ms && (
+                      <span className="text-subtleText font-mono">{searchResult.search_duration_ms}ms</span>
+                    )}
+                  </div>
                 </div>
 
-                {searchResult.best_match.reasons && searchResult.best_match.reasons.length > 0 && (
-                  <div className="bg-spaceBg p-2.5 rounded-lg border border-panelBorder space-y-1 text-[10px] text-subtleText">
-                    {searchResult.best_match.reasons.map((r, idx) => (
-                      <div key={idx}>{r}</div>
-                    ))}
+                {/* Other Candidates (2nd Match, 3rd Match) */}
+                {searchResult.other_matches && searchResult.other_matches.length > 0 && (
+                  <div className="space-y-2">
+                    <h4 className="text-[10px] font-bold text-subtleText uppercase tracking-wider">Other Matches</h4>
+                    <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                      {searchResult.other_matches.map((match, idx) => (
+                        <div key={idx} className="bg-panelBg/80 p-2 rounded-lg border border-panelBorder flex items-center space-x-2 text-xs">
+                          <img
+                            src={getFullUrl(match.product.image_url)}
+                            alt={match.product.name}
+                            className="w-8 h-8 rounded object-cover border border-panelBorder flex-shrink-0"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <p className="font-semibold text-darkText truncate text-[11px]">{match.product.name}</p>
+                            <p className="text-[10px] text-subtleText truncate">📁 {match.folder.name}</p>
+                          </div>
+                          <span className="text-[10px] font-mono text-brandCyan font-bold">{match.confidence}%</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
@@ -401,7 +491,7 @@ export const SidePanel: React.FC = () => {
               className="w-full py-2.5 px-4 bg-brandPrimary hover:bg-brandPrimary-hover text-white font-bold text-xs rounded-xl shadow-md flex items-center justify-center space-x-2"
             >
               <RefreshCw className="w-3.5 h-3.5" />
-              <span>Select Web Image</span>
+              <span>Search Again</span>
             </button>
           </div>
         )}

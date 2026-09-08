@@ -1,6 +1,7 @@
 import os
 import uuid
 import io
+import json
 import logging
 from typing import List, Optional
 from PIL import Image
@@ -8,7 +9,6 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, s
 from sqlalchemy.orm import Session
 from app.database.db import get_db, FolderModel, ProductModel
 from app.models.schema import ProductResponse, ProductUpdate
-from app.embeddings.clip_engine import generate_image_embedding
 from app.embeddings.hash_engine import compute_sha256, compute_dhash
 
 router = APIRouter(prefix="/api/products", tags=["Products"])
@@ -29,14 +29,14 @@ def list_all_products(
 ):
     """List products across all folders with pagination"""
     products = db.query(ProductModel).order_by(ProductModel.created_at.desc()).offset(skip).limit(limit).all()
+    folder_map = {f.id: f.name for f in db.query(FolderModel).all()}
     res = []
     for p in products:
-        folder = db.query(FolderModel).filter(FolderModel.id == p.folder_id).first()
         res.append(
             ProductResponse(
                 id=p.id,
                 folder_id=p.folder_id,
-                folder_name=folder.name if folder else "Unknown Folder",
+                folder_name=folder_map.get(p.folder_id, "Unknown Folder"),
                 name=p.name,
                 image_url=p.image_url,
                 thumbnail_url=p.thumbnail_url or p.image_url,
@@ -57,17 +57,23 @@ async def create_product(
     name: str = Form(...),
     folder_id: str = Form(...),
     image: UploadFile = File(...),
+    embedding: Optional[str] = Form(None),
+    sha256_hash: Optional[str] = Form(None),
+    phash: Optional[str] = Form(None),
     db: Session = Depends(get_db)
 ):
-    """Upload product image, generate SHA-256, dHash, CLIP visual embedding, and save product record"""
+    """
+    Creates a product record.
+    Accepts client-side generated 512-dim embedding vector, saving images and hashes with zero server AI overhead.
+    """
     folder = db.query(FolderModel).filter(FolderModel.id == folder_id).first()
     if not folder:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Specified folder does not exist")
 
     content_type = image.content_type.lower() if image.content_type else "image/jpeg"
     filename = image.filename.lower() if image.filename else ""
-    valid_exts = (".jpg", ".jpeg", ".png", ".webp")
-    if not any(filename.endswith(ext) for ext in valid_exts) and not any(t in content_type for t in ["image/jpeg", "image/png", "image/webp"]):
+    valid_exts = (".jpg", ".jpeg", ".png", ".webp", ".jfif", ".bmp", ".gif", ".tiff", ".avif")
+    if not any(filename.endswith(ext) for ext in valid_exts) and not content_type.startswith("image/"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Unsupported image format. Allowed formats: JPG, JPEG, PNG, WEBP"
@@ -99,19 +105,19 @@ async def create_product(
     image_url = f"/uploads/original/{orig_filename}"
     thumbnail_url = f"/uploads/thumbnails/{thumb_filename}"
 
-    # Generate Image Fingerprints (Exact SHA-256 + Perceptual dHash)
-    sha256_val = compute_sha256(image_bytes)
-    phash_val = compute_dhash(pil_img)
+    # Calculate or use provided hashes
+    final_sha = sha256_hash or compute_sha256(image_bytes)
+    final_phash = phash or compute_dhash(pil_img)
 
-    # Generate CLIP embedding vector
-    try:
-        vector = generate_image_embedding(pil_img)
-    except Exception as e:
-        logger.error(f"Embedding generation error: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to generate visual fingerprint embedding: {e}"
-        )
+    # Parse embedding vector
+    parsed_vector = [0.0] * 512
+    if embedding:
+        try:
+            parsed_vector = json.loads(embedding) if isinstance(embedding, str) else embedding
+            if not isinstance(parsed_vector, list) or len(parsed_vector) != 512:
+                parsed_vector = [0.0] * 512
+        except Exception as ex:
+            logger.warning(f"Could not parse embedding json: {ex}")
 
     product = ProductModel(
         id=product_id,
@@ -119,14 +125,14 @@ async def create_product(
         name=name.strip(),
         image_url=image_url,
         thumbnail_url=thumbnail_url,
-        sha256_hash=sha256_val,
-        phash=phash_val,
+        sha256_hash=final_sha,
+        phash=final_phash,
         width=pil_img.width,
         height=pil_img.height,
         file_size=len(image_bytes),
         mime_type=content_type
     )
-    product.set_vector(vector)
+    product.set_vector(parsed_vector)
 
     db.add(product)
     db.commit()
@@ -165,6 +171,12 @@ def get_product(product_id: str, db: Session = Depends(get_db)):
         name=product.name,
         image_url=product.image_url,
         thumbnail_url=product.thumbnail_url or product.image_url,
+        sha256_hash=product.sha256_hash,
+        phash=product.phash,
+        width=product.width,
+        height=product.height,
+        file_size=product.file_size,
+        mime_type=product.mime_type,
         created_at=product.created_at,
         updated_at=product.updated_at
     )
@@ -174,10 +186,11 @@ async def update_product(
     product_id: str,
     name: Optional[str] = Form(None),
     folder_id: Optional[str] = Form(None),
+    embedding: Optional[str] = Form(None),
     image: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db)
 ):
-    """Update product details and re-generate visual embedding if image is replaced"""
+    """Update product details and embedding vector"""
     product = db.query(ProductModel).filter(ProductModel.id == product_id).first()
     if not product:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
@@ -190,6 +203,14 @@ async def update_product(
 
     if name:
         product.name = name.strip()
+
+    if embedding:
+        try:
+            parsed = json.loads(embedding) if isinstance(embedding, str) else embedding
+            if isinstance(parsed, list) and len(parsed) == 512:
+                product.set_vector(parsed)
+        except Exception:
+            pass
 
     if image:
         image_bytes = await image.read()
@@ -205,8 +226,11 @@ async def update_product(
         thumb_path = os.path.join(STORAGE_DIR, "thumbnails", thumb_filename)
         thumb_img.save(thumb_path, format="JPEG", quality=85)
 
-        vector = generate_image_embedding(pil_img)
-        product.set_vector(vector)
+        product.sha256_hash = compute_sha256(image_bytes)
+        product.phash = compute_dhash(pil_img)
+        product.width = pil_img.width
+        product.height = pil_img.height
+        product.file_size = len(image_bytes)
 
     db.commit()
     db.refresh(product)
@@ -220,6 +244,12 @@ async def update_product(
         name=product.name,
         image_url=product.image_url,
         thumbnail_url=product.thumbnail_url or product.image_url,
+        sha256_hash=product.sha256_hash,
+        phash=product.phash,
+        width=product.width,
+        height=product.height,
+        file_size=product.file_size,
+        mime_type=product.mime_type,
         created_at=product.created_at,
         updated_at=product.updated_at
     )
@@ -238,9 +268,15 @@ def delete_product(product_id: str, db: Session = Depends(get_db)):
     thumb_path = os.path.join(STORAGE_DIR, "thumbnails", thumb_filename)
 
     if os.path.exists(orig_path):
-        os.remove(orig_path)
+        try:
+            os.remove(orig_path)
+        except Exception:
+            pass
     if os.path.exists(thumb_path):
-        os.remove(thumb_path)
+        try:
+            os.remove(thumb_path)
+        except Exception:
+            pass
 
     db.delete(product)
     db.commit()

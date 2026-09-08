@@ -92,11 +92,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateFolder, onNaviga
 
       let res: SearchResponse;
       if (selectedFile) {
-        setSearchStep('Checking SHA-256 & dHash fingerprints against library...');
-        res = await searchByImageFile(selectedFile);
+        setSearchStep('Preparing visual signature in browser...');
+        res = await searchByImageFile(selectedFile, (info) => {
+          setSearchStep(info.message);
+        });
       } else {
-        setSearchStep('Downloading image URL & computing similarity score...');
-        res = await searchByImageUrl(searchQueryUrl.trim());
+        setSearchStep('Processing image URL...');
+        res = await searchByImageUrl(searchQueryUrl.trim(), (info) => {
+          setSearchStep(info.message);
+        });
       }
 
       setSearchResult(res);

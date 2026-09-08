@@ -43,6 +43,8 @@ export const SearchTest: React.FC = () => {
     return () => window.removeEventListener('paste', handlePaste);
   }, []);
 
+  const [stepMessage, setStepMessage] = useState('Extracting visual features...');
+
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -50,6 +52,7 @@ export const SearchTest: React.FC = () => {
 
     try {
       setSearching(true);
+      setStepMessage('Preparing image...');
       let res: SearchResponse;
 
       if (activeMode === 'file') {
@@ -58,14 +61,18 @@ export const SearchTest: React.FC = () => {
           setSearching(false);
           return;
         }
-        res = await searchByImageFile(selectedFile);
+        res = await searchByImageFile(selectedFile, (info) => {
+          setStepMessage(info.message);
+        });
       } else {
         if (!imageUrl.trim()) {
           setError('Please enter an image URL.');
           setSearching(false);
           return;
         }
-        res = await searchByImageUrl(imageUrl.trim());
+        res = await searchByImageUrl(imageUrl.trim(), (info) => {
+          setStepMessage(info.message);
+        });
       }
 
       setResult(res);
@@ -181,7 +188,7 @@ export const SearchTest: React.FC = () => {
               {searching ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin text-white" />
-                  <span>Computing CLIP Vectors...</span>
+                  <span>{stepMessage}</span>
                 </>
               ) : (
                 <>

@@ -11,7 +11,7 @@ from app.models.schema import (
     AnalyticsResponse, SearchHistoryResponse, AssistantQueryRequest,
     AssistantQueryResponse, SearchCandidate, FolderResponse
 )
-from app.embeddings.clip_engine import generate_text_embedding, compute_cosine_similarity
+from app.embeddings.clip_engine import compute_cosine_similarity
 from app.embeddings.hash_engine import hamming_distance
 
 router = APIRouter(prefix="/api/intelligence", tags=["Intelligence"])
@@ -21,7 +21,7 @@ logger = logging.getLogger("product_finder.intelligence")
 def get_duplicate_intelligence(db: Session = Depends(get_db)):
     """
     Scans image library to detect exact SHA-256 binary duplicate files and near-duplicate dHash visual matches.
-    Calculates total potential storage space savings.
+    Calculates total potential storage space savings using zero server-side deep learning memory.
     """
     products = db.query(ProductModel).all()
     folder_map = {f.id: f for f in db.query(FolderModel).all()}
@@ -154,7 +154,7 @@ def get_analytics(db: Session = Depends(get_db)):
 
     total_files = len(products)
     total_folders = len(folders)
-    total_indexed = total_files  # All uploaded products generate CLIP vectors
+    total_indexed = total_files
 
     total_bytes = sum(p.file_size or 150000 for p in products)
     storage_mb = round(total_bytes / (1024 * 1024), 2)
@@ -204,19 +204,9 @@ def normalize_text(text: str) -> str:
     return text
 
 def extract_search_tokens(query: str) -> List[str]:
-    """
-    Extracts candidate target keywords from user natural language query.
-    Handles phrases like:
-    - find 'gojo'
-    - find "gojo"
-    - where is gojo
-    - which folder is gojo in
-    - locate gojo.png
-    - gojo
-    """
+    """Extracts candidate target keywords from user natural language query."""
     q = query.strip().strip('"\'')
     
-    # Remove common conversational command prefixes
     patterns = [
         r'^(?:please\s+)?(?:can\s+you\s+)?(?:find|search(?:\s+for)?|locate|where\s+is|which\s+folder\s+(?:is|has|contains)|show\s+me|tell\s+me\s+where\s+is|in\s+which\s+folder\s+is|lookup|get)\s+(?:the\s+)?(?:image\s+|file\s+|pic\s+|photo\s+|picture\s+)?(?:named\s+|called\s+)?',
         r'^(?:image|file|pic|photo|picture)\s+(?:named|called)\s+'
@@ -226,10 +216,7 @@ def extract_search_tokens(query: str) -> List[str]:
     for pat in patterns:
         cleaned = re.sub(pat, '', cleaned, flags=re.IGNORECASE).strip()
     
-    # Strip any enclosing quotes
     cleaned = cleaned.strip(' "\'')
-    
-    # Strip image extensions (.png, .jpg, .jpeg, .webp, .gif, .svg, .bmp, .tiff, .avif, .ico)
     cleaned_no_ext = re.sub(r'\.(png|jpe?g|webp|gif|svg|bmp|tiff|avif|ico)$', '', cleaned, flags=re.IGNORECASE).strip()
     
     tokens = []
@@ -247,9 +234,9 @@ def run_ai_assistant_query(req: AssistantQueryRequest, db: Session = Depends(get
     """
     Translates natural language user questions into intelligent folder location answers.
     Combines:
-    1. Case-insensitive exact & substring filename matching (extension-agnostic, e.g. find "gojo" -> "gojo.png" in folder X).
+    1. Case-insensitive exact & substring filename matching.
     2. Folder name matching.
-    3. CLIP semantic text-to-image vector similarity search.
+    3. Client-provided semantic text/image vector similarity search via NumPy.
     """
     query_str = req.query.strip()
     if not query_str:
@@ -266,15 +253,7 @@ def run_ai_assistant_query(req: AssistantQueryRequest, db: Session = Depends(get
 
     folder_map = {f.id: f for f in db.query(FolderModel).all()}
     tokens = extract_search_tokens(query_str)
-    
-    # Try computing CLIP text embedding
-    text_vector = None
-    try:
-        # Use primary extracted target keyword or full query for CLIP
-        clip_query = tokens[0] if tokens else query_str
-        text_vector = generate_text_embedding(clip_query)
-    except Exception as e:
-        logger.warning(f"CLIP embedding failed, falling back to name/folder indexing: {e}")
+    text_vector = req.embedding
 
     scored_map: Dict[str, SearchCandidate] = {}
 
@@ -298,7 +277,7 @@ def run_ai_assistant_query(req: AssistantQueryRequest, db: Session = Depends(get
             if not norm_token:
                 continue
 
-            # Exact match without extension (e.g. query "gojo" matches "gojo.png" or "Gojo.jpg")
+            # Exact match without extension
             if norm_token == norm_base or norm_token == norm_raw:
                 score = 100
                 if score > best_score:
@@ -306,8 +285,7 @@ def run_ai_assistant_query(req: AssistantQueryRequest, db: Session = Depends(get
                     reasons = [f"🎯 Exact filename match for '{raw_name}' in folder '{folder.name}'"]
                 break
 
-            # Word boundary / substring match
-            # e.g., token "gojo" in "gojo satoru.png" or "wallpaper_gojo.jpg"
+            # Substring match
             if norm_token in norm_base or norm_token in norm_raw:
                 score = 95
                 if score > best_score:
@@ -336,8 +314,8 @@ def run_ai_assistant_query(req: AssistantQueryRequest, db: Session = Depends(get
                     best_score = score
                     reasons = [f"📁 Image belongs to matching folder '{folder.name}'"]
 
-        # 2. CLIP Semantic Similarity Check
-        if text_vector is not None:
+        # 2. Semantic Vector Similarity Check if embedding was provided
+        if text_vector is not None and len(text_vector) == 512:
             try:
                 prod_vec = p.get_vector()
                 sim = compute_cosine_similarity(text_vector, prod_vec)
@@ -345,11 +323,11 @@ def run_ai_assistant_query(req: AssistantQueryRequest, db: Session = Depends(get
                 if clip_conf >= 38:
                     if clip_conf > best_score:
                         best_score = clip_conf
-                        reasons = [f"🧠 Visual CLIP match ({clip_conf}%) in folder '{folder.name}'"]
+                        reasons = [f"🧠 Visual semantic match ({clip_conf}%) in folder '{folder.name}'"]
                     elif best_score >= 80:
                         reasons.append(f"🧠 Visual relevance confirmed ({clip_conf}%)")
             except Exception as e:
-                logger.debug(f"CLIP similarity calculation error for {p.id}: {e}")
+                logger.debug(f"Similarity calculation error for {p.id}: {e}")
 
         if best_score >= 40:
             candidate = SearchCandidate(
@@ -387,7 +365,6 @@ def run_ai_assistant_query(req: AssistantQueryRequest, db: Session = Depends(get
 
     if scored:
         top = scored[0]
-        # Direct, crystal-clear message pointing out the folder
         if top.confidence >= 90:
             if len(scored) == 1:
                 msg = f"📍 '{top.product.name}' is located in folder '{top.folder.name}'."
@@ -409,7 +386,6 @@ def run_ai_assistant_query(req: AssistantQueryRequest, db: Session = Depends(get
             message=f"I couldn't find any image matching '{query_str}' in your folders.",
             matches=[]
         )
-
 
 @router.get("/history", response_model=List[SearchHistoryResponse])
 def get_search_history(db: Session = Depends(get_db)):
