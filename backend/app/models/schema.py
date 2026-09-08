@@ -85,7 +85,7 @@ class FolderDetailResponse(FolderResponse):
 
 # Search Schemas
 class VisualSearchRequest(BaseModel):
-    embedding: List[float] = Field(..., description="512-dimensional client-generated visual embedding vector")
+    embedding: Optional[List[float]] = Field(None, description="512-dimensional client-generated visual embedding vector")
     sha256_hash: Optional[str] = Field(None, description="Optional SHA-256 binary hash for exact matching")
     phash: Optional[str] = Field(None, description="Optional perceptual dHash for near-duplicate matching")
     limit: int = Field(10, ge=1, le=50)

@@ -215,16 +215,22 @@ export const SidePanel: React.FC = () => {
         }
       }
 
-      setSearchStep('Generating visual signature...');
+      setSearchStep('Generating visual signatures...');
       const targetInput = imageBlob || imageSrc;
 
-      const [sha256Hash, phash, embedding] = await Promise.all([
+      const [sha256Hash, phash] = await Promise.all([
         imageBlob ? computeSHA256(imageBlob).catch(() => undefined) : undefined,
-        computeDHash(targetInput).catch(() => undefined),
-        imageEmbeddingService.generateEmbedding(targetInput, (info) => {
-          setSearchStep(info.message);
-        })
+        computeDHash(targetInput).catch(() => undefined)
       ]);
+
+      let embedding: number[] | undefined = undefined;
+      try {
+        embedding = await imageEmbeddingService.generateEmbedding(targetInput, (info) => {
+          setSearchStep(info.message);
+        });
+      } catch (embErr) {
+        console.warn('[FolderLens] Embedding engine offline/fallback to perceptual fingerprint:', embErr);
+      }
 
       setSearchStep('Searching library...');
 

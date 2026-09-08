@@ -42,10 +42,13 @@ async def search_by_visual_embedding(
     limit = req.limit
     folder_id = req.folder_id
 
-    if not query_vector or len(query_vector) != 512:
+    has_vector = bool(query_vector and len(query_vector) == 512)
+    has_hash = bool(query_sha256 or query_dhash)
+
+    if not has_vector and not has_hash:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid embedding dimension. Expected 512-dimensional vector, got {len(query_vector) if query_vector else 0}."
+            detail="At least one visual search signal (embedding vector, SHA-256 hash, or perceptual dHash) must be provided."
         )
 
     # Base query
@@ -68,14 +71,18 @@ async def search_by_visual_embedding(
     scored_candidates: List[SearchCandidate] = []
 
     # Vectorized / fast loop
-    q_vec_arr = np.asarray(query_vector, dtype=np.float32)
+    q_vec_arr = np.asarray(query_vector, dtype=np.float32) if has_vector else None
 
     for prod in products:
         reasons = []
-        prod_vec = prod.get_vector()
-        vector_sim = compute_cosine_similarity(q_vec_arr, prod_vec)
+        vector_sim = 0.0
         
-        confidence = int(round(max(0.0, vector_sim) * 100))
+        if has_vector and q_vec_arr is not None:
+            prod_vec = prod.get_vector()
+            vector_sim = float(compute_cosine_similarity(q_vec_arr, prod_vec))
+            confidence = int(round(max(0.0, vector_sim) * 100))
+        else:
+            confidence = 0
 
         # Check Exact SHA-256
         if query_sha256 and prod.sha256_hash and query_sha256.lower() == prod.sha256_hash.lower():

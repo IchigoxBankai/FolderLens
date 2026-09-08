@@ -169,16 +169,22 @@ export const searchByImageFile = async (
     });
   }
 
-  const [sha256Hash, phash, embedding] = await Promise.all([
+  const [sha256Hash, phash] = await Promise.all([
     computeSHA256(file),
-    computeDHash(file).catch(() => undefined),
-    imageEmbeddingService.generateEmbedding(file, onStepProgress)
+    computeDHash(file).catch(() => undefined)
   ]);
+
+  let embedding: number[] | undefined = undefined;
+  try {
+    embedding = await imageEmbeddingService.generateEmbedding(file, onStepProgress);
+  } catch (embErr) {
+    console.warn('[FolderLens] Embedding engine offline/fallback to perceptual fingerprint:', embErr);
+  }
 
   if (onStepProgress) {
     onStepProgress({
       status: 'generating_embedding',
-      message: 'Searching multi-signal vector database...'
+      message: 'Searching multi-signal library database...'
     });
   }
 
