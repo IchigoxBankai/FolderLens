@@ -102,8 +102,15 @@ async def create_product(
     thumb_path = os.path.join(STORAGE_DIR, "thumbnails", thumb_filename)
     thumb_img.save(thumb_path, format="JPEG", quality=85)
 
+    # Base64 thumbnail data URL for permanent cloud display
+    import base64
+    thumb_buffer = io.BytesIO()
+    thumb_img.save(thumb_buffer, format="JPEG", quality=80)
+    thumb_b64 = base64.b64encode(thumb_buffer.getvalue()).decode('utf-8')
+    thumbnail_data_url = f"data:image/jpeg;base64,{thumb_b64}"
+
     image_url = f"/uploads/original/{orig_filename}"
-    thumbnail_url = f"/uploads/thumbnails/{thumb_filename}"
+    thumbnail_url = thumbnail_data_url
 
     # Calculate or use provided hashes
     final_sha = sha256_hash or compute_sha256(image_bytes)

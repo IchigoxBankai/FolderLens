@@ -10,6 +10,29 @@ interface FolderDetailProps {
   onBack: () => void;
 }
 
+const ProductImageCard: React.FC<{ src: string; alt: string; className?: string }> = ({ src, alt, className }) => {
+  const [error, setError] = useState(false);
+
+  if (error || !src) {
+    return (
+      <div className="w-full h-full flex flex-col items-center justify-center bg-oliveActive/20 p-2 text-center text-subtleText">
+        <ImageIcon className="w-7 h-7 opacity-50 text-olivePrimary mb-1" />
+        <span className="text-[10px] font-medium text-darkText truncate max-w-[90%] px-1">{alt}</span>
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={src}
+      alt={alt}
+      onError={() => setError(true)}
+      className={className || "w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"}
+      loading="lazy"
+    />
+  );
+};
+
 export const FolderDetail: React.FC<FolderDetailProps> = ({ folder, onBack }) => {
   const [detail, setDetail] = useState<FolderDetailType | null>(null);
   const [loading, setLoading] = useState(true);
@@ -139,11 +162,9 @@ export const FolderDetail: React.FC<FolderDetailProps> = ({ folder, onBack }) =>
               className="bg-panelBg rounded-2xl border border-panelBorder overflow-hidden hover:border-olivePrimary hover:bg-oliveActive/40 transition-all flex flex-col justify-between group space-y-3 p-3 shadow-sm"
             >
               <div className="relative aspect-square bg-spaceBg rounded-xl overflow-hidden flex items-center justify-center border border-panelBorder">
-                <img
+                <ProductImageCard
                   src={getImageUrl(product.thumbnail_url || product.image_url)}
                   alt={product.name}
-                  className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
-                  loading="lazy"
                 />
               </div>
 
@@ -182,7 +203,11 @@ export const FolderDetail: React.FC<FolderDetailProps> = ({ folder, onBack }) =>
             <div key={product.id} className="p-3 flex items-center justify-between hover:bg-oliveActive/40 transition-colors">
               <div className="flex items-center gap-3">
                 <div className="w-12 h-12 rounded-lg overflow-hidden border border-panelBorder bg-spaceBg flex-shrink-0">
-                  <img src={getImageUrl(product.thumbnail_url || product.image_url)} alt={product.name} className="w-full h-full object-cover" />
+                  <ProductImageCard
+                    src={getImageUrl(product.thumbnail_url || product.image_url)}
+                    alt={product.name}
+                    className="w-full h-full object-cover"
+                  />
                 </div>
                 <div>
                   <div className="text-xs font-bold text-darkText">{product.name}</div>

@@ -116,6 +116,11 @@ async def upload_preindexed_folder(
         thumbnail_url = ""
 
         if item.thumbnail_base64:
+            if item.thumbnail_base64.startswith("data:"):
+                thumbnail_url = item.thumbnail_base64
+            else:
+                thumbnail_url = f"data:{item.mime_type or 'image/jpeg'};base64,{item.thumbnail_base64}"
+
             try:
                 raw_b64 = item.thumbnail_base64
                 if "," in raw_b64:
@@ -133,7 +138,6 @@ async def upload_preindexed_folder(
                     f.write(img_data)
 
                 image_url = f"/uploads/original/{orig_filename}"
-                thumbnail_url = f"/uploads/thumbnails/{thumb_filename}"
             except Exception as ex:
                 logger.warning(f"Failed to decode thumbnail for {item.name}: {ex}")
 
