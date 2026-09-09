@@ -27,3 +27,7 @@ Thumbs.db
 .vscode/
 .idea/
 *.log
+
+# Archives & Zips
+/extension.zip
+extension/*.zip

@@ -1,5 +1,22 @@
-import React, { useState, useEffect } from 'react';
-import { Search, Sparkles, ArrowRight, Chrome, CheckCircle2, Copy, Bot, Cpu, Folder, ShieldCheck } from 'lucide-react';
+﻿import React, { useState, useEffect } from 'react';
+import { 
+  Search, 
+  Sparkles, 
+  ArrowRight, 
+  Chrome, 
+  CheckCircle2, 
+  Copy, 
+  Bot, 
+  Cpu, 
+  Folder, 
+  ShieldCheck, 
+  Download, 
+  Check, 
+  FolderArchive, 
+  Settings, 
+  Puzzle,
+  ExternalLink
+} from 'lucide-react';
 
 interface LandingPageProps {
   onOpenApp: () => void;
@@ -8,6 +25,7 @@ interface LandingPageProps {
 
 export const LandingPage: React.FC<LandingPageProps> = ({ onOpenApp, onOpenAboutModal }) => {
   const [activeStep, setActiveStep] = useState(0);
+  const [copiedUrl, setCopiedUrl] = useState(false);
 
   // Animated demonstration step loop
   useEffect(() => {
@@ -17,11 +35,51 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenApp, onOpenAbout
     return () => clearInterval(timer);
   }, []);
 
+  const handleCopyChromeUrl = () => {
+    navigator.clipboard.writeText('chrome://extensions');
+    setCopiedUrl(true);
+    setTimeout(() => setCopiedUrl(false), 2000);
+  };
+
+  const scrollToExtensionGuide = () => {
+    const element = document.getElementById('extension-setup-guide');
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth' });
+    }
+  };
+
   const demoSteps = [
     { title: '1. Select Webpage Image', subtitle: 'User hovers & left-clicks product image on any website', badge: 'Chrome Extension' },
     { title: '2. Multi-Signal AI Analysis', subtitle: 'Generates 512-dim CLIP vector & dHash fingerprint', badge: 'FastAPI Backend' },
     { title: '3. Vector Similarity Search', subtitle: 'Scans indexed library vectors & SHA-256 hashes', badge: 'Image Intelligence Engine' },
     { title: '4. Exact Folder Location Found', subtitle: 'Identifies 98.7% Match in "Products / Nike / Shoes"', badge: 'FolderLens Result' },
+  ];
+
+  const installSteps = [
+    {
+      step: '01',
+      title: 'Download & Unzip',
+      desc: 'Download the extension package (.zip) using the button above and extract it to a permanent folder on your PC.',
+      badge: 'Step 1'
+    },
+    {
+      step: '02',
+      title: 'Open Chrome Extensions',
+      desc: 'Navigate to chrome://extensions in your Google Chrome or Brave/Edge URL bar.',
+      badge: 'Step 2'
+    },
+    {
+      step: '03',
+      title: 'Enable Developer Mode',
+      desc: 'Toggle the "Developer mode" switch in the top-right corner of your extensions page to ON.',
+      badge: 'Step 3'
+    },
+    {
+      step: '04',
+      title: 'Click "Load Unpacked"',
+      desc: 'Click the "Load unpacked" button in the top-left corner and select your extracted folder.',
+      badge: 'Step 4'
+    }
   ];
 
   return (
@@ -61,6 +119,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenApp, onOpenAbout
           >
             <span>Open Workspace Dashboard</span>
             <ArrowRight className="w-4 h-4" />
+          </button>
+
+          <button
+            onClick={scrollToExtensionGuide}
+            className="px-6 py-3.5 bg-white/80 hover:bg-white text-[#0F172A] font-bold text-sm rounded-xl border border-white/80 shadow-md hover:shadow-lg transition-all flex items-center gap-2 text-[#0284C7]"
+          >
+            <Chrome className="w-4 h-4 text-[#0284C7]" />
+            <span>Install Extension</span>
           </button>
 
           <button
@@ -140,6 +206,96 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenApp, onOpenAbout
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
+        </div>
+      </div>
+
+      {/* Chrome Extension Download & How-To-Use Guide Section */}
+      <div id="extension-setup-guide" className="relative z-10 max-w-5xl mx-auto space-y-8 scroll-mt-20">
+        <div className="bg-white/55 backdrop-blur-md p-8 sm:p-12 rounded-3xl border border-white/60 shadow-2xl space-y-8">
+          
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6 pb-6 border-b border-white/50">
+            <div className="space-y-2 text-left">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#0284C7]/10 text-[#0284C7] text-xs font-bold border border-[#0284C7]/20">
+                <Chrome className="w-3.5 h-3.5" /> CHROME EXTENSION SETUP
+              </div>
+              <h2 className="text-2xl sm:text-3xl font-extrabold text-[#0F172A] font-serif-title">
+                Install FolderLens in Your Browser
+              </h2>
+              <p className="text-xs sm:text-sm text-[#334155] font-medium max-w-xl">
+                Search images on any live website using the FolderLens Manifest V3 Chrome Extension. Download the package below and activate it in 30 seconds.
+              </p>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+              <a
+                href="/folderlens-extension.zip"
+                download="folderlens-extension.zip"
+                className="px-6 py-4 bg-[#0284C7] hover:bg-[#0369A1] text-white font-bold text-sm rounded-2xl shadow-xl hover:shadow-2xl transition-all flex items-center justify-center gap-3 group transform hover:-translate-y-0.5"
+              >
+                <Download className="w-5 h-5 group-hover:animate-bounce" />
+                <div className="text-left leading-tight">
+                  <div className="text-[11px] font-medium opacity-90">Ready-to-use package</div>
+                  <div className="text-sm font-extrabold">Download Extension (.zip)</div>
+                </div>
+              </a>
+            </div>
+          </div>
+
+          {/* Step-by-Step Installation Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {installSteps.map((item, idx) => (
+              <div 
+                key={idx}
+                className="bg-white/65 backdrop-blur-sm p-5 rounded-2xl border border-white/60 shadow-md hover:border-[#0284C7] hover:shadow-lg transition-all space-y-3 flex flex-col justify-between"
+              >
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-2xl font-black font-mono text-[#0284C7]/40">{item.step}</span>
+                    <span className="px-2 py-0.5 text-[10px] font-bold bg-[#0284C7]/10 text-[#0284C7] rounded-md border border-[#0284C7]/20">
+                      {item.badge}
+                    </span>
+                  </div>
+                  <h4 className="text-sm font-bold text-[#0F172A]">{item.title}</h4>
+                  <p className="text-xs text-[#334155] font-medium leading-relaxed">{item.desc}</p>
+                </div>
+
+                {item.step === '02' && (
+                  <div className="pt-2">
+                    <button
+                      onClick={handleCopyChromeUrl}
+                      className="w-full py-1.5 px-2.5 bg-white/80 hover:bg-white text-[#0284C7] text-[11px] font-mono font-bold rounded-lg border border-[#0284C7]/30 flex items-center justify-center gap-1.5 transition-all shadow-sm"
+                    >
+                      {copiedUrl ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedUrl ? 'Copied to Clipboard!' : 'chrome://extensions'}</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Quick Start Tip Box */}
+          <div className="bg-white/75 backdrop-blur-md p-5 rounded-2xl border border-[#0284C7]/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-[#0284C7]/10 text-[#0284C7] flex items-center justify-center shrink-0">
+                <Puzzle className="w-5 h-5" />
+              </div>
+              <div className="text-left text-xs text-[#1E293B] font-medium">
+                <span className="font-bold text-[#0F172A] block text-sm">How to use once activated:</span>
+                Click the Extension puzzle icon in Chrome toolbar, pin <strong className="text-[#0284C7]">FolderLens</strong>, and click it to open the search sidepanel!
+              </div>
+            </div>
+
+            <a
+              href="/folderlens-extension.zip"
+              download="folderlens-extension.zip"
+              className="text-xs font-bold text-[#0284C7] hover:text-[#0369A1] underline flex items-center gap-1 shrink-0 self-end sm:self-center"
+            >
+              <span>Download .zip again</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </a>
+          </div>
+
         </div>
       </div>
 
