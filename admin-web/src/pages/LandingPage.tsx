@@ -1,10 +1,9 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Search, 
   Sparkles, 
   ArrowRight, 
   Chrome, 
-  CheckCircle2, 
   Copy, 
   Bot, 
   Cpu, 
@@ -12,10 +11,7 @@ import {
   ShieldCheck, 
   Download, 
   Check, 
-  FolderArchive, 
-  Settings, 
-  Puzzle,
-  ExternalLink
+  Puzzle
 } from 'lucide-react';
 
 interface LandingPageProps {
@@ -154,7 +150,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenApp, onOpenAbout
         </div>
 
         {/* Step Cards Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 my-8">
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mt-6 mb-2">
           {demoSteps.map((step, idx) => (
             <div
               key={idx}
@@ -170,42 +166,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenApp, onOpenAbout
               <div className="text-[11px] text-[#1E293B] font-medium leading-snug">{step.subtitle}</div>
             </div>
           ))}
-        </div>
-
-        {/* Simulation Output Card */}
-        <div className="bg-white/50 backdrop-blur-sm p-5 rounded-2xl border border-white/40 flex flex-col sm:flex-row items-center justify-between gap-4 text-left shadow-sm">
-          <div className="flex items-center gap-4">
-            <div className="w-16 h-16 rounded-xl bg-white/80 border border-white/60 overflow-hidden flex items-center justify-center relative group shadow-sm">
-              <img
-                src="https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&q=80&w=200"
-                alt="Demo Product"
-                className="w-full h-full object-cover"
-              />
-              <span className="absolute inset-0 bg-[#0284C7]/20 flex items-center justify-center opacity-100">
-                <CheckCircle2 className="w-6 h-6 text-[#0D9488]" />
-              </span>
-            </div>
-            <div>
-              <div className="text-xs font-mono text-[#0D9488] flex items-center gap-1 font-bold">
-                <CheckCircle2 className="w-3.5 h-3.5" /> 98.7% MATCH CONFIDENCE
-              </div>
-              <div className="text-sm font-bold text-[#0F172A]">Nike Air Max Red Edition.jpg</div>
-              <div className="text-xs text-[#1E293B] font-semibold flex items-center gap-1.5 mt-0.5">
-                <Folder className="w-3.5 h-3.5 text-[#0284C7]" />
-                <span>Products / Nike / Shoes</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3 w-full sm:w-auto">
-            <button
-              onClick={onOpenApp}
-              className="w-full sm:w-auto px-5 py-2.5 bg-[#0284C7] hover:bg-[#0369A1] text-white text-xs font-bold rounded-xl transition-colors flex items-center justify-center gap-2 shadow-md"
-            >
-              <span>Test In Web App</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
         </div>
       </div>
 
